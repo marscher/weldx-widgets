@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Union
 
 import k3d
@@ -634,6 +635,69 @@ class CoordinateSystemManagerVisualizerK3D:
         if limits is None:
             limits = self._get_limits()
         self.grid = limits
+        # embed widgets in html output of a notebook including a CSM visualization.
+        from ipywidgets import embed
+
+        with self._force_numpy_compatible_json_encoder():
+            boxed = VBox([self._controls, self._plot])
+            embed.embed_minimal_html("k3d_embedded.html", views=[boxed])
+
+    @contextlib.contextmanager
+    def _force_numpy_compatible_json_encoder(self):
+        """We enforce a numpy compatible json encoder within the given context."""
+        import json
+
+        class NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(
+                    obj,
+                    (
+                        np.int_,
+                        np.intc,
+                        np.intp,
+                        np.int8,
+                        np.int16,
+                        np.int32,
+                        np.int64,
+                        np.uint8,
+                        np.uint16,
+                        np.uint32,
+                        np.uint64,
+                    ),
+                ):
+
+                    return int(obj)
+
+                elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+                    return float(obj)
+
+                elif isinstance(obj, (np.complex_, np.complex64, np.complex128)):
+                    return {"real": obj.real, "imag": obj.imag}
+
+                elif isinstance(obj, (np.ndarray,)):
+                    return obj.tolist()
+
+                elif isinstance(obj, (np.bool_)):
+                    return bool(obj)
+
+                elif isinstance(obj, (np.void)):
+                    return None
+
+                return json.JSONEncoder.default(self, obj)
+
+        from unittest.mock import patch
+
+        org = json.dumps
+
+        def encoder_enforce(*args, **kw):
+            if "cls" in kw:
+                raise RuntimeError(
+                    "already an encoding class requested," "refusing to override."
+                )
+            return org(*args, cls=NumpyEncoder, **kw)
+
+        with patch("json.dumps", encoder_enforce):
+            yield
 
     @property
     def grid(self):
